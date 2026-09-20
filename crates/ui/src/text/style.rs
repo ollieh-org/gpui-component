@@ -20,6 +20,8 @@ pub struct TextViewStyle {
     pub highlight_theme: Arc<HighlightTheme>,
     /// The style refinement for code blocks.
     pub code_block: StyleRefinement,
+    /// Style refinement for block quotes.
+    pub blockquote: StyleRefinement,
     /// Style refinement applied to the table container (the bordered wrapper
     /// in wrap mode, the scroll viewport in horizontal-scroll mode).
     ///
@@ -59,6 +61,7 @@ impl PartialEq for TextViewStyle {
                 _ => false,
             }
             && self.highlight_theme == other.highlight_theme
+            && self.blockquote == other.blockquote
             && self.code_block == other.code_block
             && self.table == other.table
             && self.table_head == other.table_head
@@ -76,6 +79,7 @@ impl Default for TextViewStyle {
             heading_font_size: None,
             highlight_theme: HighlightTheme::default_light().clone(),
             code_block: StyleRefinement::default(),
+            blockquote: StyleRefinement::default(),
             table: StyleRefinement::default(),
             table_head: StyleRefinement::default(),
             table_cell: StyleRefinement::default(),

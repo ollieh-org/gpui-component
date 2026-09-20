@@ -2376,6 +2376,7 @@ impl BlockNode {
                         .text_color(cx.theme().muted_foreground)
                         .border_l_3()
                         .border_color(cx.theme().secondary_active)
+                        .refine_style(&node_cx.style.blockquote)
                         .px_4()
                         .children({
                             let children_len = children.len();

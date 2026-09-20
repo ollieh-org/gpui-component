@@ -48,10 +48,10 @@ gpui-shell = { package = "gpui_ce_components_shell", path = "crates/shell", vers
 gpui-wry = { package = "gpui_ce_components_webview", path = "crates/webview", version = "0.2.0" }
 story = { path = "crates/story" }
 
-gpui = { git = "https://github.com/ollieh-org/gpui-ce", rev = "359279b71c10936199d32a94b897a5bef4f99138", package = "gpui-ce" }
-gpui_platform = { git = "https://github.com/ollieh-org/gpui-ce", rev = "359279b71c10936199d32a94b897a5bef4f99138", package = "gpui_ce_platform", features = ["font-kit", "x11", "wayland"] }
-gpui_web = { git = "https://github.com/ollieh-org/gpui-ce", rev = "359279b71c10936199d32a94b897a5bef4f99138", package = "gpui_ce_web" }
-gpui_macros = { git = "https://github.com/ollieh-org/gpui-ce", rev = "359279b71c10936199d32a94b897a5bef4f99138", package = "gpui_ce_macros" }
+gpui = { git = "https://github.com/ollieh-org/gpui-ce", rev = "54607b5080d4d0a8d1fb835a67c82d8e83ffa6de", package = "gpui-ce" }
+gpui_platform = { git = "https://github.com/ollieh-org/gpui-ce", rev = "54607b5080d4d0a8d1fb835a67c82d8e83ffa6de", package = "gpui_ce_platform", features = ["font-kit", "x11", "wayland"] }
+gpui_web = { git = "https://github.com/ollieh-org/gpui-ce", rev = "54607b5080d4d0a8d1fb835a67c82d8e83ffa6de", package = "gpui_ce_web" }
+gpui_macros = { git = "https://github.com/ollieh-org/gpui-ce", rev = "54607b5080d4d0a8d1fb835a67c82d8e83ffa6de", package = "gpui_ce_macros" }
 sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
 reqwest = { version = "0.12.15-zed", package = "zed-reqwest", default-features = false, features = [
   "charset",
