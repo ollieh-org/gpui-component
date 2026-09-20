@@ -1361,7 +1361,7 @@ impl PopupMenu {
                                 )
                                 .snap_to_window_with_margin(Edges::all(EDGE_PADDING)),
                         )
-                        .with_priority(self.priority + 1)
+                        .priority(self.priority + 1)
                     })
                 }),
         }
@@ -1441,33 +1441,29 @@ impl Render for PopupMenu {
             .text_color(cx.theme().popover_foreground)
             .relative()
             .occlude()
-            .child(
-                gpui_base::ElementExt::on_prepaint(
-                    v_flex()
-                        .id("items")
-                        .p_1()
-                        .gap_y_0p5()
-                        .min_w(rems(8.))
-                        .when_some(self.min_width, |this, min_width| this.min_w(min_width))
-                        .max_w(max_width)
-                        .when(self.scrollable, |this| {
-                            this.max_h(max_height)
-                                .overflow_y_scroll()
-                                .track_scroll(&self.scroll_handle)
-                        })
-                        .children(
-                            self.menu_items
-                                .iter()
-                                .enumerate()
-                                // Ignore last separator
-                                .filter(|(ix, item)| {
-                                    !(*ix + 1 == items_count && item.is_separator())
-                                })
-                                .map(|(ix, item)| self.render_item(ix, item, options, window, cx)),
-                        ),
-                    move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds),
-                ),
-            )
+            .child(gpui_base::ElementExt::on_prepaint(
+                v_flex()
+                    .id("items")
+                    .p_1()
+                    .gap_y_0p5()
+                    .min_w(rems(8.))
+                    .when_some(self.min_width, |this, min_width| this.min_w(min_width))
+                    .max_w(max_width)
+                    .when(self.scrollable, |this| {
+                        this.max_h(max_height)
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll_handle)
+                    })
+                    .children(
+                        self.menu_items
+                            .iter()
+                            .enumerate()
+                            // Ignore last separator
+                            .filter(|(ix, item)| !(*ix + 1 == items_count && item.is_separator()))
+                            .map(|(ix, item)| self.render_item(ix, item, options, window, cx)),
+                    ),
+                move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds),
+            ))
             .when(self.scrollable, |this| {
                 // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
                 this.vertical_scrollbar(&self.scroll_handle)

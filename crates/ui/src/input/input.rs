@@ -224,7 +224,7 @@ impl Input {
 
     /// Set full height of the input (Multi-line only).
     pub fn h_full(mut self) -> Self {
-        self.height = Some(relative(1.));
+        self.height = Some(relative(1.).into());
         self
     }
 
@@ -887,10 +887,7 @@ mod tests {
             let _ = window.draw(cx);
         });
 
-        assert_eq!(
-            *captured.lock().unwrap(),
-            vec![None, None]
-        );
+        assert_eq!(*captured.lock().unwrap(), vec![None, None]);
     }
 
     #[test]

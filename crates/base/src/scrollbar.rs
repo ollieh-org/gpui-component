@@ -1506,8 +1506,9 @@ impl Element for Scrollbar {
                                     left: px(0.),
                                 }
                             },
-                            border_color: painted_border,
+                            border_color: painted_border.into(),
                             border_style: BorderStyle::default(),
+                            ..fill(painted_bounds, gpui::transparent_black())
                         });
 
                         cx.paint_quad(

@@ -2,9 +2,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    App, AppContext as _, Axis, BorderStyle, Bounds, ContentMask, Edges, Element, ElementId, GlobalElementId,
-    Hitbox, Hsla, InteractiveElement as _, IntoElement, IsZero as _, LayoutId, OngoingScroll,
-    PaintQuad, ParentElement as _, Point, Position, ScrollHandle, ScrollWheelEvent,
+    App, AppContext as _, Axis, BorderStyle, Bounds, ContentMask, Edges, Element, ElementId,
+    GlobalElementId, Hitbox, Hsla, InteractiveElement as _, IntoElement, IsZero as _, LayoutId,
+    OngoingScroll, PaintQuad, ParentElement as _, Point, Position, ScrollHandle, ScrollWheelEvent,
     StatefulInteractiveElement as _, Style, StyleRefinement, Styled as _, Window, div, px,
     relative,
 };
@@ -195,10 +195,11 @@ impl Element for ScrollableMask {
                 window.paint_quad(PaintQuad {
                     bounds,
                     border_widths: Edges::all(px(1.0)),
-                    border_color: color,
+                    border_color: color.into(),
                     background: gpui::transparent_white().into(),
                     corner_radii: Corners::all(px(0.)),
                     border_style: BorderStyle::default(),
+                    ..gpui::fill(bounds, gpui::transparent_white())
                 });
             }
 

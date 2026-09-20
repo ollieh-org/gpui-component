@@ -176,7 +176,7 @@ fn default_mono_font_family() -> SharedString {
 
 fn box_shadow(x: f32, y: f32, blur: f32, spread: f32, color: Hsla) -> BoxShadow {
     BoxShadow {
-        color,
+        color: color.into(),
         offset: point(px(x), px(y)),
         blur_radius: px(blur),
         spread_radius: px(spread),

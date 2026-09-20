@@ -6,10 +6,10 @@ use std::{
 };
 
 use gpui::{
-    App, AppContext as _, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId, GlobalElementId,
-    Half, HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
-    MouseButton, MouseClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    SharedString, StyledText, TextLayout, Window, point, px, quad,
+    App, AppContext as _, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId,
+    GlobalElementId, Half, HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement,
+    LayoutId, MouseButton, MouseClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    Point, SharedString, StyledText, TextLayout, Window, point, px, quad,
 };
 
 use crate::{
@@ -104,9 +104,10 @@ impl Inline {
                 color.into()
             },
             corner_radii: Corners::default(),
-            border_color: gpui::transparent_black(),
+            border_color: gpui::transparent_black().into(),
             border_style: BorderStyle::default(),
             border_widths: gpui::Edges::all(px(0.)),
+            ..gpui::fill(bounds, gpui::transparent_black())
         });
     }
 

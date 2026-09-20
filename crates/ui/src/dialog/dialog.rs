@@ -664,14 +664,14 @@ impl RenderOnce for Dialog {
                                             // This is equivalent to `shadow_xl` with an extra opacity.
                                             let shadow = vec![
                                                 BoxShadow {
-                                                    color: hsla(0., 0., 0., 0.1 * delta),
+                                                    color: hsla(0., 0., 0., 0.1 * delta).into(),
                                                     offset: point(px(0.), px(20.)),
                                                     blur_radius: px(25.),
                                                     spread_radius: px(-5.),
                                                     inset: false,
                                                 },
                                                 BoxShadow {
-                                                    color: hsla(0., 0., 0., 0.1 * delta),
+                                                    color: hsla(0., 0., 0., 0.1 * delta).into(),
                                                     offset: point(px(0.), px(8.)),
                                                     blur_radius: px(10.),
                                                     spread_radius: px(-6.),

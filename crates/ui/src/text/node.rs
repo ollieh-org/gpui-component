@@ -2251,7 +2251,7 @@ impl BlockNode {
                         .when(align == ColumnumnAlign::Center, |this| this.text_center())
                         .when(align == ColumnumnAlign::Right, |this| this.text_right())
                         .min_w_16()
-                        .w(Length::Definite(relative(len as f32)))
+                        .w(Length::Definite(relative(len as f32).into()))
                         .px_2()
                         .py_1()
                         .when(!is_last_col, |this| {

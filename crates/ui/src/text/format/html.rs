@@ -158,7 +158,7 @@ fn value_to_length(value: &str) -> Option<DefiniteLength> {
             .trim_end_matches("%")
             .parse::<f32>()
             .ok()
-            .map(|v| relative(v / 100.))
+            .map(|v| relative(v / 100.).into())
     } else {
         value
             .trim_end_matches("px")
