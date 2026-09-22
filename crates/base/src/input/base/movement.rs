@@ -287,7 +287,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let offset = self.previous_start_of_word();
+        let offset = super::inline_tokens::snap(
+            &self.inline_tokens,
+            self.previous_start_of_word(),
+            Some(false),
+        );
         self.move_to(offset, None, cx);
     }
 
@@ -297,7 +301,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let offset = self.next_end_of_word();
+        let offset =
+            super::inline_tokens::snap(&self.inline_tokens, self.next_end_of_word(), Some(true));
         self.move_to(offset, None, cx);
     }
 }
