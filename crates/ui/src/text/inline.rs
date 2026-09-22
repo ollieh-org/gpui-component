@@ -432,6 +432,26 @@ impl Element for Inline {
         }
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        let mouse_position = window.mouse_position();
+        let text_layout = self.styled_text.layout().clone();
+        if let Some(link) = Self::link_for_position(&text_layout, &self.links, mouse_position) {
+            if hitbox.is_hovered(window) {
+                let hitbox = hitbox.clone();
+                let layout = text_layout.clone();
+                let links = self.links.clone();
+                let url = link.url.clone();
+                let view = crate::tooltip::Tooltip::new(link.url).build(window, cx);
+                window.set_tooltip(gpui::AnyTooltip {
+                    view,
+                    mouse_position,
+                    check_visible_and_update: Rc::new(move |_, window, _| {
+                        hitbox.is_hovered(window)
+                            && Self::link_for_position(&layout, &links, window.mouse_position())
+                                .is_some_and(|link| link.url == url)
+                    }),
+                });
+            }
+        }
         hitbox
     }
 
@@ -467,24 +487,8 @@ impl Element for Inline {
 
         // link cursor pointer
         let mouse_position = window.mouse_position();
-        if let Some(link) = Self::link_for_position(&text_layout, &self.links, mouse_position) {
+        if Self::link_for_position(&text_layout, &self.links, mouse_position).is_some() {
             window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
-            if hitbox.is_hovered(window) {
-                let hitbox = hitbox.clone();
-                let layout = text_layout.clone();
-                let links = self.links.clone();
-                let url = link.url.clone();
-                let view = crate::tooltip::Tooltip::new(link.url).build(window, cx);
-                window.set_tooltip(gpui::AnyTooltip {
-                    view,
-                    mouse_position,
-                    check_visible_and_update: Rc::new(move |_, window, _| {
-                        hitbox.is_hovered(window)
-                            && Self::link_for_position(&layout, &links, window.mouse_position())
-                                .is_some_and(|link| link.url == url)
-                    }),
-                });
-            }
         }
 
         // A link's context menu owns right clicks, not the surrounding message.
