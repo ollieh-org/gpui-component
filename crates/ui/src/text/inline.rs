@@ -363,13 +363,31 @@ impl Element for Inline {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let text_style = window.text_style();
 
+        let hovered_index = self.state.lock().ok().and_then(|state| state.hovered_index);
+        let hovered_link = self
+            .links
+            .iter()
+            .find(|(range, _)| hovered_index.is_some_and(|index| range.contains(&index)));
+        let hover_highlights = hovered_link.into_iter().map(|(range, _)| {
+            (
+                range.clone(),
+                HighlightStyle {
+                    underline: Some(gpui::UnderlineStyle {
+                        thickness: px(1.),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )
+        });
+        let highlights = gpui::combine_highlights(self.highlights.clone(), hover_highlights);
         let mut runs = Vec::new();
         let mut ix = 0;
-        for (range, highlight) in self.highlights.iter() {
+        for (range, highlight) in highlights {
             if ix < range.start {
                 runs.push(text_style.clone().to_run(range.start - ix));
             }
-            runs.push(text_style.clone().highlight(*highlight).to_run(range.len()));
+            runs.push(text_style.clone().highlight(highlight).to_run(range.len()));
             ix = range.end;
         }
         if ix < self.text.len() {
@@ -527,18 +545,22 @@ impl Element for Inline {
         window.on_mouse_event({
             let hitbox = hitbox.clone();
             let text_layout = text_layout.clone();
-            let mut hovered_index = state.hovered_index;
+            let state = self.state.clone();
             move |event: &MouseMoveEvent, phase, window, cx| {
-                if !phase.bubble() || !hitbox.is_hovered(window) {
+                if !phase.bubble() {
                     return;
                 }
 
-                let current = hovered_index;
-                let updated = text_layout.index_for_position(event.position).ok();
-                //  notify update when hovering over different links
-                if current != updated {
-                    hovered_index = updated;
-                    cx.notify(current_view);
+                let updated = if hitbox.is_hovered(window) {
+                    text_layout.index_for_position(event.position).ok()
+                } else {
+                    None
+                };
+                if let Ok(mut state) = state.lock() {
+                    if state.hovered_index != updated {
+                        state.hovered_index = updated;
+                        cx.notify(current_view);
+                    }
                 }
             }
         });
