@@ -127,3 +127,111 @@ impl RenderOnce for Textarea {
             .refine_style(&self.style)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ElementExt as _, input::TextareaState};
+    use gpui::{Context, Render, TestAppContext, div, prelude::*, px};
+    use std::sync::{Arc, Mutex};
+
+    struct Composer {
+        state: Entity<TextareaState>,
+        height: Arc<Mutex<f32>>,
+    }
+    impl Render for Composer {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let measured = self.height.clone();
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().flex_1().min_h(px(0.)))
+                .child(
+                    div().flex_none().flex().flex_col().child(
+                        div()
+                            .w_full()
+                            .flex_none()
+                            .min_h(px(58.))
+                            .px_2()
+                            .py_2()
+                            .flex()
+                            .items_start()
+                            .child(div().size(px(32.)).flex_none())
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .flex()
+                                    .flex_col()
+                                    .px(px(2.))
+                                    .py_1()
+                                    .child(
+                                        Textarea::new(&self.state)
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .w_full(),
+                                    ),
+                            )
+                            .on_prepaint(move |bounds, _, _| {
+                                *measured.lock().unwrap() = bounds.size.height.as_f32()
+                            }),
+                    ),
+                )
+        }
+    }
+    #[gpui::test]
+    fn auto_grow_composer_grows_and_shrinks_with_content(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let height = Arc::new(Mutex::new(0.));
+        let observed = height.clone();
+        let (root, cx) = cx.add_window_view(|window, cx| Composer {
+            state: cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 8)),
+            height,
+        });
+        cx.run_until_parked();
+        let before = *observed.lock().unwrap();
+        cx.update(|window, cx| {
+            root.update(cx, |root, cx| {
+                root.state.update(cx, |state, cx| {
+                    state.set_value("one\ntwo\nthree", window, cx)
+                })
+            })
+        });
+        cx.run_until_parked();
+        let after = *observed.lock().unwrap();
+        assert!(after > before, "composer did not grow: {before} -> {after}");
+        for content in [
+            "wrapped words ".repeat(500),
+            "line\n".repeat(12),
+            "line\n".repeat(24),
+        ] {
+            cx.update(|window, cx| {
+                root.update(cx, |root, cx| {
+                    root.state
+                        .update(cx, |state, cx| state.set_value(content, window, cx))
+                })
+            });
+            cx.run_until_parked();
+            assert!(*observed.lock().unwrap() > after);
+        }
+        let capped = *observed.lock().unwrap();
+        cx.update(|window, cx| {
+            root.update(cx, |root, cx| {
+                root.state.update(cx, |state, cx| {
+                    state.set_value("line\n".repeat(100), window, cx)
+                })
+            })
+        });
+        cx.run_until_parked();
+        assert_eq!(*observed.lock().unwrap(), capped);
+        cx.update(|window, cx| {
+            root.update(cx, |root, cx| {
+                root.state
+                    .update(cx, |state, cx| state.set_value("one", window, cx))
+            })
+        });
+        cx.run_until_parked();
+        assert_eq!(*observed.lock().unwrap(), before);
+    }
+}

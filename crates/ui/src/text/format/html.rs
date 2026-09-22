@@ -329,6 +329,7 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &Rc<Node>) {
             paragraph.push_str(&part);
         }
         NodeData::Element { name, attrs, .. } => match name.local {
+            local_name!("br") => paragraph.push_str("\n"),
             local_name!("em") | local_name!("i") => {
                 merge_children_with_mark(node, paragraph, Some(TextMark::default().italic()));
             }
@@ -421,10 +422,10 @@ fn parse_node(
             ref attrs,
             ..
         } => match name.local {
-            local_name!("br") => Some(BlockNode::Break {
-                html: true,
-                span: None,
-            }),
+            local_name!("br") => {
+                paragraph.push_str("\n");
+                None
+            }
             local_name!("h1")
             | local_name!("h2")
             | local_name!("h3")
@@ -669,6 +670,28 @@ mod tests {
     use super::trim_text;
 
     #[test]
+    fn html_line_breaks_survive_inline_parsing() {
+        for html in [
+            "testing<br>multiline<br>message",
+            "<p>testing<br>multiline<br>message</p>",
+            "<p><span>testing<br/>multiline<br />message</span></p>",
+        ] {
+            let parsed = super::parse(html, &mut NodeContext::default()).unwrap();
+            assert_eq!(
+                parsed.to_markdown(),
+                "testing\nmultiline\nmessage",
+                "{html}"
+            );
+        }
+        let parsed = super::parse(
+            "<p><strong>one<br><br>two</strong></p>",
+            &mut NodeContext::default(),
+        )
+        .unwrap();
+        assert_eq!(parsed.to_markdown(), "**one\n\ntwo**");
+    }
+
+    #[test]
     fn test_cleanup_html() {
         let html = r#"<p>
             and
@@ -754,8 +777,8 @@ mod tests {
     #[test]
     fn test_value_to_length() {
         assert_eq!(super::value_to_length("100px"), Some(px(100.).into()));
-        assert_eq!(super::value_to_length("100%"), Some(relative(1.)));
-        assert_eq!(super::value_to_length("56%"), Some(relative(0.56)));
+        assert_eq!(super::value_to_length("100%"), Some(relative(1.).into()));
+        assert_eq!(super::value_to_length("56%"), Some(relative(0.56).into()));
         assert_eq!(super::value_to_length("240"), Some(px(240.).into()));
     }
 
@@ -794,7 +817,7 @@ mod tests {
                     children: vec![InlineNode::image(ImageNode {
                         url: "https://example.com/image.png".to_string().into(),
                         alt: Some("Example".to_string().into()),
-                        width: Some(relative(0.8)),
+                        width: Some(relative(0.8).into()),
                         height: None,
                         title: Some("Example Image".to_string().into()),
                         ..Default::default()
