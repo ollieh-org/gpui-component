@@ -4,6 +4,10 @@ use gpui::{App, HighlightStyle, Pixels, Rems, StyleRefinement, px, rems};
 
 use crate::{ActiveTheme as _, highlighter::HighlightTheme};
 
+/// Resolves application-owned inline image identifiers to native elements.
+/// Returning `None` preserves the normal URI-backed image behavior.
+pub type InlineImageRenderer = dyn Fn(&str) -> Option<gpui::AnyElement> + Send + Sync;
+
 /// TextViewStyle used to customize the style for [`TextView`].
 #[derive(Clone)]
 pub struct TextViewStyle {
@@ -47,6 +51,7 @@ pub struct TextViewStyle {
     pub inline_code: HighlightStyle,
     /// Optional per-destination styling, applied after the default link color.
     pub link_highlight: Option<fn(&str) -> Option<HighlightStyle>>,
+    pub inline_image_renderer: Option<Arc<InlineImageRenderer>>,
     pub is_dark: bool,
 }
 
@@ -74,6 +79,11 @@ impl PartialEq for TextViewStyle {
                 (None, None) => true,
                 _ => false,
             }
+            && match (&self.inline_image_renderer, &other.inline_image_renderer) {
+                (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
             && self.is_dark == other.is_dark
     }
 }
@@ -92,6 +102,7 @@ impl Default for TextViewStyle {
             table_cell: StyleRefinement::default(),
             inline_code: HighlightStyle::default(),
             link_highlight: None,
+            inline_image_renderer: None,
             is_dark: false,
         }
     }

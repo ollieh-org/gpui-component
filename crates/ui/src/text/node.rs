@@ -1384,11 +1384,15 @@ impl Paragraph {
         let span = self.span;
         let children = &self.children;
 
-        if self.should_render_inline_flow() {
+        if self.should_render_inline_flow()
+            || (node_cx.style.inline_image_renderer.is_some()
+                && self.children.iter().any(|child| child.image.is_some()))
+        {
             return InlineFlow::new(
                 span.unwrap_or_default(),
                 self.inline_flow_items(node_cx, cx),
                 node_cx.link_click_handler.clone(),
+                node_cx.style.inline_image_renderer.clone(),
             )
             .into_any_element();
         }

@@ -6,12 +6,14 @@ use std::{
 use gpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, DefiniteLength, Element, ElementId,
     GlobalElementId, HighlightStyle, InspectorElementId, InteractiveElement as _, IntoElement,
-    LayoutId, LineFragment as WrapLineFragment, ObjectFit, Pixels, ShapedLine, SharedString,
-    SharedUri, Size, StatefulInteractiveElement as _, Styled, StyledImage as _, TextRun, TextStyle,
-    WhiteSpace, Window, img, point, prelude::FluentBuilder as _, px, relative, size,
+    LayoutId, LineFragment as WrapLineFragment, ObjectFit, ParentElement as _, Pixels, ShapedLine,
+    SharedString, SharedUri, Size, StatefulInteractiveElement as _, Styled, StyledImage as _,
+    TextRun, TextStyle, WhiteSpace, Window, img, point, prelude::FluentBuilder as _, px, relative,
+    size,
 };
 
 use crate::{
+    text::style::InlineImageRenderer,
     text::text_view::{LinkClickHandlerFn, handle_link_click},
     tooltip::Tooltip,
 };
@@ -28,6 +30,7 @@ pub(super) struct InlineFlow {
     id: ElementId,
     items: Vec<InlineFlowItem>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    image_renderer: Option<Arc<InlineImageRenderer>>,
 }
 
 pub(super) enum InlineFlowItem {
@@ -109,11 +112,13 @@ impl InlineFlow {
         id: impl Into<ElementId>,
         items: Vec<InlineFlowItem>,
         link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+        image_renderer: Option<Arc<InlineImageRenderer>>,
     ) -> Self {
         Self {
             id: id.into(),
             items,
             link_click_handler,
+            image_renderer,
         }
     }
 
@@ -121,21 +126,30 @@ impl InlineFlow {
         ix: usize,
         url: &SharedUri,
         link: &Option<LinkMark>,
-        title: &str,
+        _title: &str,
         size: Size<Pixels>,
         link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+        custom: Option<AnyElement>,
     ) -> AnyElement {
-        img(image_source(url))
+        let content = custom.unwrap_or_else(|| {
+            img(image_source(url))
+                .object_fit(ObjectFit::Contain)
+                .w(size.width)
+                .h(size.height)
+                .into_any_element()
+        });
+        gpui::div()
             .id(ix)
-            .object_fit(ObjectFit::Contain)
+            .child(content)
             .max_w(relative(1.))
             .w(size.width)
             .h(size.height)
             .when_some(link.clone(), |this, link| {
-                let title = title.to_string();
+                let title = link.url.to_string();
                 let aux_link = link.clone();
                 let aux_link_click_handler = link_click_handler.clone();
                 this.cursor_pointer()
+                    .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
                     .tooltip(move |window, cx| Tooltip::new(title.clone()).build(window, cx))
                     .on_click(move |event, window, cx| {
                         gpui_base::TextSelection::end(window, cx);
@@ -198,16 +212,27 @@ impl Element for InlineFlow {
             .iter()
             .enumerate()
             .map(|(ix, item)| match item {
-                MeasureItem::Image { url, width, height } => Some(measure_image_size(
-                    ix,
-                    url,
-                    *width,
-                    *height,
-                    line_height,
-                    rem_size,
-                    window,
-                    cx,
-                )),
+                MeasureItem::Image { url, width, height } => {
+                    if let Some(mut element) =
+                        self.image_renderer.as_ref().and_then(|render| render(url))
+                    {
+                        return Some(element.layout_as_root(
+                            AvailableSpace::min_size(),
+                            window,
+                            cx,
+                        ));
+                    }
+                    Some(measure_image_size(
+                        ix,
+                        url,
+                        *width,
+                        *height,
+                        line_height,
+                        rem_size,
+                        window,
+                        cx,
+                    ))
+                }
                 MeasureItem::Text { .. } => None,
             })
             .collect::<Vec<_>>();
@@ -321,6 +346,7 @@ impl Element for InlineFlow {
                         title.as_str(),
                         fragment_size,
                         self.link_click_handler.clone(),
+                        self.image_renderer.as_ref().and_then(|render| render(url)),
                     );
                     element.prepaint_as_root(
                         bounds.origin + origin,
