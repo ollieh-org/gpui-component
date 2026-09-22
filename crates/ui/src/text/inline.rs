@@ -29,6 +29,8 @@ use crate::{
 pub(super) struct Inline {
     id: ElementId,
     text: SharedString,
+    source_text: SharedString,
+    padding: CodePadding,
     links: Rc<Vec<(Range<usize>, LinkMark)>>,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     styled_text: StyledText,
@@ -72,6 +74,8 @@ impl Inline {
             links: Rc::new(links),
             highlights,
             text: text.clone(),
+            source_text: text.clone(),
+            padding: CodePadding::default(),
             styled_text: StyledText::new(text),
             font_runs: Vec::new(),
             link_click_handler,
@@ -80,7 +84,27 @@ impl Inline {
     }
 
     pub(super) fn font_runs(mut self, font_runs: Vec<(Range<usize>, SharedString)>) -> Self {
-        self.font_runs = font_runs;
+        if font_runs.is_empty() {
+            return self;
+        }
+        let (text, padding) = CodePadding::new(&self.source_text, &font_runs);
+        self.text = text;
+        self.links = Rc::new(
+            self.links
+                .iter()
+                .map(|(range, link)| (padding.display_range(range.clone()), link.clone()))
+                .collect(),
+        );
+        self.highlights = self
+            .highlights
+            .into_iter()
+            .map(|(range, style)| (padding.display_range(range), style))
+            .collect();
+        self.font_runs = font_runs
+            .into_iter()
+            .map(|(range, font)| (padding.display_range(range), font))
+            .collect();
+        self.padding = padding;
         self
     }
 
@@ -136,7 +160,11 @@ impl Inline {
         }
 
         if text_view_state.is_all_selected() {
-            return (is_selectable, true, Some((0..self.text.len()).into()));
+            return (
+                is_selectable,
+                true,
+                Some((0..self.source_text.len()).into()),
+            );
         }
 
         if let Some(selection) = text_view_state.multi_click_selection() {
@@ -150,7 +178,7 @@ impl Inline {
                     selection.pos,
                     selection.kind,
                 )
-                .map(Selection::from),
+                .map(|range| Selection::from(self.padding.source_range(range))),
             );
         }
 
@@ -212,7 +240,13 @@ impl Inline {
             offset = next_offset;
         }
 
-        (true, true, selection)
+        (
+            true,
+            true,
+            selection.map(|selection| {
+                Selection::from(self.padding.source_range(selection.start..selection.end))
+            }),
+        )
     }
 
     fn text_line_bounds(
@@ -553,7 +587,10 @@ impl Element for Inline {
 
         if let Some(selection) = &state.selection {
             Self::paint_selection(
-                selection,
+                &self
+                    .padding
+                    .display_range(selection.start..selection.end)
+                    .into(),
                 &text_layout,
                 &bounds,
                 window,
@@ -579,6 +616,8 @@ impl Element for Inline {
                 let text_layout = text_layout.clone();
                 let inline_state = self.state.clone();
                 let text = self.text.clone();
+                let source_text = self.source_text.clone();
+                let padding = self.padding.clone();
                 let text_view_state = UiGlobalState::global(cx).text_view_state().cloned();
                 move |event: &MouseDownEvent, phase, window, cx| {
                     if !phase.bubble()
@@ -604,7 +643,8 @@ impl Element for Inline {
                         return;
                     };
 
-                    let selected_text = text[range.clone()].to_string();
+                    let range = padding.source_range(range);
+                    let selected_text = source_text[range.clone()].to_string();
 
                     // This renderer owns multi-click selection. Prevent the
                     // window selection layer from handling the same press.
@@ -1018,6 +1058,69 @@ mod tests {
     }
 }
 
+/// Display-only spacing. Selection offsets always map back to the original text.
+#[derive(Clone, Default)]
+pub(super) struct CodePadding {
+    insertions: Vec<(usize, Range<usize>, bool)>,
+}
+
+impl CodePadding {
+    pub(super) fn new(text: &str, fonts: &[(Range<usize>, SharedString)]) -> (SharedString, Self) {
+        // Word joiners keep the small side bearings attached to the code.
+        const PAD: &str = "\u{2060}\u{2005}\u{2060}";
+        let mut boundaries: Vec<_> = fonts
+            .iter()
+            .filter(|(range, _)| !range.is_empty())
+            .flat_map(|(range, _)| [(range.start, true), (range.end, false)])
+            .collect();
+        boundaries.sort_unstable();
+        boundaries.dedup();
+        let mut padded = String::with_capacity(text.len() + boundaries.len() * PAD.len());
+        let mut mapping = Self::default();
+        let mut previous = 0;
+        for (boundary, opening) in boundaries {
+            padded.push_str(&text[previous..boundary]);
+            let start = padded.len();
+            padded.push_str(PAD);
+            mapping
+                .insertions
+                .push((boundary, start..padded.len(), opening));
+            previous = boundary;
+        }
+        padded.push_str(&text[previous..]);
+        (padded.into(), mapping)
+    }
+
+    fn display_offset(&self, offset: usize) -> usize {
+        // Closing padding belongs to the preceding character; opening padding
+        // belongs to the following one. Adjacent style ranges stay disjoint.
+        offset
+            + self
+                .insertions
+                .iter()
+                .filter(|(source, _, opening)| *source < offset || (*source == offset && !opening))
+                .map(|(_, range, _)| range.len())
+                .sum::<usize>()
+    }
+
+    pub(super) fn display_range(&self, range: Range<usize>) -> Range<usize> {
+        self.display_offset(range.start)..self.display_offset(range.end)
+    }
+
+    fn source_offset(&self, offset: usize) -> usize {
+        offset
+            - self
+                .insertions
+                .iter()
+                .map(|(_, range, _)| offset.saturating_sub(range.start).min(range.len()))
+                .sum::<usize>()
+    }
+
+    pub(super) fn source_range(&self, range: Range<usize>) -> Range<usize> {
+        self.source_offset(range.start)..self.source_offset(range.end)
+    }
+}
+
 /// Split shaped runs at font boundaries without changing UTF-8 byte offsets.
 pub(super) fn apply_font_runs(
     runs: Vec<gpui::TextRun>,
@@ -1059,6 +1162,46 @@ pub(super) fn apply_font_runs(
 #[cfg(test)]
 mod font_run_tests {
     use super::*;
+
+    #[test]
+    fn chip_padding_is_display_only_and_round_trips_unicode_selection() {
+        let source = "é \u{2005}code 後";
+        let code = 6..10;
+        let (display, padding) = CodePadding::new(source, &[(code.clone(), "Mono".into())]);
+        assert!(display.len() > source.len());
+        assert_eq!(padding.source_range(0..display.len()), 0..source.len());
+        let displayed_code = padding.display_range(code.clone());
+        assert_eq!(padding.source_range(displayed_code.clone()), code);
+        assert!(display[displayed_code].contains("code"));
+        for offset in source
+            .char_indices()
+            .map(|(index, _)| index)
+            .chain([source.len()])
+        {
+            assert_eq!(
+                padding.source_offset(padding.display_offset(offset)),
+                offset
+            );
+        }
+        for (_, inserted, _) in &padding.insertions {
+            assert!(padding.source_range(inserted.clone()).is_empty());
+        }
+        // An actual space in the code/source is never stripped as padding.
+        assert_eq!(&source[padding.source_range(0..display.len())], source);
+    }
+
+    #[test]
+    fn padding_keeps_adjacent_highlight_ranges_disjoint() {
+        let (_, padding) = CodePadding::new("a code z", &[(2..6, "Mono".into())]);
+        let before = padding.display_range(0..2);
+        let code = padding.display_range(2..6);
+        let after = padding.display_range(6..8);
+        assert_eq!(before.end, code.start);
+        assert_eq!(code.end, after.start);
+        assert_eq!(before.len(), 2);
+        assert_eq!(after.len(), 2);
+        assert!(code.len() > 4);
+    }
 
     #[test]
     fn code_font_splits_runs_and_preserves_utf8_offsets_and_surrounding_style() {

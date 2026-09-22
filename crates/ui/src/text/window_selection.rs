@@ -1134,6 +1134,24 @@ mod tests {
     }
 
     #[gpui::test]
+    fn padded_inline_code_copies_original_source_without_layout_spaces(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| InlineImageSourceTestView {
+                text_view: cx.new(|cx| TextViewState::markdown("é `server_name` and `後`.", cx)),
+            });
+            Root::new(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        drag(cx, point(px(0.), px(11.)), point(px(600.), px(80.)));
+        assert_eq!(window_selected_text(cx).trim(), "é `server_name` and `後`.");
+    }
+
+    #[gpui::test]
     fn source_format_maps_offsets_per_rendered_run(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|window, cx| {

@@ -481,12 +481,24 @@ fn layout_flow(
                             slice_ranges(font_runs, local_start, local_end, |range, family| {
                                 (range, family.clone())
                             });
+                        let (display, padding) =
+                            super::inline::CodePadding::new(&subtext, &font_runs);
+                        let display_highlights = highlights
+                            .iter()
+                            .map(|(range, style)| (padding.display_range(range.clone()), *style))
+                            .collect();
+                        let display_fonts = font_runs
+                            .iter()
+                            .map(|(range, font)| {
+                                (padding.display_range(range.clone()), font.clone())
+                            })
+                            .collect::<Vec<_>>();
                         let runs = super::inline::apply_font_runs(
-                            runs_for_highlights(&subtext, text_style, highlights.clone()),
-                            &font_runs,
+                            runs_for_highlights(&display, text_style, display_highlights),
+                            &display_fonts,
                         );
 
-                        let shaped_line = shape_line(subtext.clone(), font_size, &runs, window);
+                        let shaped_line = shape_line(display, font_size, &runs, window);
                         let width = shaped_line.width();
                         line_width += width;
                         line_fragments.push(LineFragmentLayout {
@@ -596,39 +608,90 @@ fn line_ranges(
 
     for hard_line in hard_lines {
         let mut item_start = 0;
+        let mut code_continuation_padding = px(0.);
         let wrap_fragments = items
             .iter()
             .enumerate()
-            .filter_map(|(ix, item)| {
+            .flat_map(|(ix, item)| {
                 let item_end = item_start + item.len();
-                let fragment = if item_end <= hard_line.start || item_start >= hard_line.end {
-                    None
-                } else {
+                let mut fragments = Vec::new();
+                if item_end > hard_line.start && item_start < hard_line.end {
                     match item {
-                        MeasureItem::Text { text, .. } => {
+                        MeasureItem::Text {
+                            text, font_runs, ..
+                        } => {
                             let start = hard_line.start.max(item_start) - item_start;
                             let end = hard_line.end.min(item_end) - item_start;
-                            (start < end).then(|| WrapLineFragment::text(&text[start..end]))
+                            let mut boundaries = vec![start, end];
+                            for (code, _) in font_runs {
+                                boundaries.extend([
+                                    code.start.clamp(start, end),
+                                    code.end.clamp(start, end),
+                                ]);
+                            }
+                            boundaries.sort_unstable();
+                            boundaries.dedup();
+                            for part in boundaries.windows(2) {
+                                let range = part[0]..part[1];
+                                let source = &text[range.clone()];
+                                if let Some((_, font)) = font_runs
+                                    .iter()
+                                    .find(|(code, _)| code.contains(&range.start))
+                                {
+                                    let fonts = vec![(0..source.len(), font.clone())];
+                                    let (display, padding) =
+                                        super::inline::CodePadding::new(source, &fonts);
+                                    let display_fonts = vec![(0..display.len(), font.clone())];
+                                    let runs = super::inline::apply_font_runs(
+                                        vec![text_style.to_run(display.len())],
+                                        &display_fonts,
+                                    );
+                                    let shaped = shape_line(display, font_size, &runs, window);
+                                    let plain_runs = super::inline::apply_font_runs(
+                                        vec![text_style.to_run(source.len())],
+                                        &fonts,
+                                    );
+                                    let plain = shape_line(
+                                        source.to_owned().into(),
+                                        font_size,
+                                        &plain_runs,
+                                        window,
+                                    );
+                                    code_continuation_padding = code_continuation_padding
+                                        .max(shaped.width() - plain.width());
+                                    for (offset, ch) in source.char_indices() {
+                                        let display_range =
+                                            padding.display_range(offset..offset + ch.len_utf8());
+                                        let width = shaped.x_for_index(display_range.end)
+                                            - shaped.x_for_index(display_range.start);
+                                        fragments
+                                            .push(WrapLineFragment::element(width, ch.len_utf8()));
+                                    }
+                                } else {
+                                    fragments.push(WrapLineFragment::text(source));
+                                }
+                            }
                         }
-                        MeasureItem::Image { .. } => (hard_line.start <= item_start
-                            && item_end <= hard_line.end)
-                            .then(|| {
-                                WrapLineFragment::element(
-                                    image_sizes[ix]
-                                        .expect("image size should be measured before wrapping")
-                                        .width,
-                                    IMAGE_LEN,
-                                )
-                            }),
+                        MeasureItem::Image { .. } => {
+                            fragments.push(WrapLineFragment::element(
+                                image_sizes[ix]
+                                    .expect("image size should be measured before wrapping")
+                                    .width,
+                                IMAGE_LEN,
+                            ));
+                        }
                     }
-                };
+                }
                 item_start = item_end;
-                fragment
+                fragments
             })
             .collect::<Vec<_>>();
 
         let boundaries = wrapper
-            .wrap_line(&wrap_fragments, wrap_width)
+            .wrap_line(
+                &wrap_fragments,
+                (wrap_width - code_continuation_padding).max(px(1.)),
+            )
             .map(|boundary| hard_line.start + boundary.ix.min(hard_line.len()))
             .collect::<Vec<_>>();
         let mut start = hard_line.start;
@@ -800,6 +863,66 @@ fn slice_ranges<T, U>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn code_chip_layout_reserves_side_padding_and_wraps_with_inline_images(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use gpui::Render;
+        struct Empty;
+        impl Render for Empty {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                gpui::div()
+            }
+        }
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, _| Empty);
+        cx.update(|window, cx| {
+            use crate::ActiveTheme;
+            let style = window.text_style();
+            let code = "server_name_and_another_long_identifier";
+            let fonts = vec![(0..code.len(), cx.theme().mono_font_family.clone())];
+            let items = vec![
+                MeasureItem::Image {
+                    url: "test-chip".into(),
+                    width: None,
+                    height: None,
+                },
+                MeasureItem::Text {
+                    text: code.into(),
+                    links: vec![],
+                    highlights: vec![],
+                    font_runs: fonts,
+                },
+            ];
+            let layout = layout_flow(
+                &items,
+                &[Some(size(px(20.), px(20.))), None],
+                &style,
+                Some(px(150.)),
+                window,
+            );
+            assert!(layout.size.height > window.line_height());
+            assert!(
+                layout.size.width <= px(150.),
+                "chips overflowed the line: {:?}",
+                layout.size
+            );
+            let code_only = layout_flow(&items[1..], &[None], &style, None, window);
+            let mut run = style.to_run(code.len());
+            run.font.family = cx.theme().mono_font_family.clone();
+            let plain = shape_line(
+                code.into(),
+                style.font_size.to_pixels(window.rem_size()),
+                &[run],
+                window,
+            );
+            assert!(
+                code_only.size.width > plain.width(),
+                "code must reserve horizontal padding"
+            );
+        });
+    }
 
     #[test]
     fn inline_image_without_explicit_size_scales_intrinsic_ratio_to_line_height() {
