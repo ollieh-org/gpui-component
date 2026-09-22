@@ -618,12 +618,11 @@ impl<M: InputModeKind> TextElement<M> {
         (cursor_bounds, scroll_offset, current_row)
     }
 
-    /// Layout the match range to a Path.
-    pub(crate) fn layout_match_range(
+    /// Per-row geometry shared by selections and rounded inline token backgrounds.
+    fn layout_range_corners(
         range: Range<usize>,
         last_layout: &LastLayout,
-        bounds: &Bounds<Pixels>,
-    ) -> Option<Path<Pixels>> {
+    ) -> Option<Vec<Corners<Point<Pixels>>>> {
         if range.is_empty() {
             return None;
         }
@@ -637,7 +636,6 @@ impl<M: InputModeKind> TextElement<M> {
         let line_height = last_layout.line_height;
         let visible_top = last_layout.visible_top;
         let lines = &last_layout.lines;
-        let line_number_width = last_layout.line_number_width;
 
         let start_ix = range.start;
         let end_ix = range.end;
@@ -725,6 +723,17 @@ impl<M: InputModeKind> TextElement<M> {
             offset_y += line_size.height;
         }
 
+        Some(line_corners)
+    }
+
+    /// Layout the match range to a Path.
+    pub(crate) fn layout_match_range(
+        range: Range<usize>,
+        last_layout: &LastLayout,
+        bounds: &Bounds<Pixels>,
+    ) -> Option<Path<Pixels>> {
+        let mut line_corners = Self::layout_range_corners(range, last_layout)?;
+        let line_number_width = last_layout.line_number_width;
         let mut points = vec![];
         if line_corners.is_empty() {
             return None;
@@ -1432,10 +1441,15 @@ impl<M: InputModeKind> TextElement<M> {
                         compose_decoration_collections(
                             compose_decorations(
                                 Vec::new(),
-                                state
-                                    .inline_tokens
-                                    .iter()
-                                    .map(|token| (token.range.clone(), state.token_style)),
+                                state.inline_tokens.iter().map(|token| {
+                                    (
+                                        token.range.clone(),
+                                        HighlightStyle {
+                                            background_color: None,
+                                            ..state.token_style
+                                        },
+                                    )
+                                }),
                                 visible_byte_range.clone(),
                             )
                             .unwrap_or_default(),
@@ -2169,6 +2183,32 @@ impl<M: InputModeKind> Element for TextElement<M> {
         // Paint indent guides
         if let Some(path) = prepaint.indent_guides_path.take() {
             window.paint_path(path, editor_style.border.opacity(0.85));
+        }
+
+        // Paint chip backgrounds before selections so selected tokens remain legible.
+        let state = self.state.read(cx);
+        if !state.masked
+            && let Some(color) = state.token_style.background_color
+        {
+            let origin = bounds.origin + point(prepaint.last_layout.line_number_width, px(0.));
+            for token in &state.inline_tokens {
+                if let Some(rows) =
+                    Self::layout_range_corners(token.range.clone(), &prepaint.last_layout)
+                {
+                    for row in rows {
+                        let chip =
+                            Bounds::from_corners(origin + row.top_left, origin + row.bottom_right);
+                        window.paint_quad(gpui::quad(
+                            chip,
+                            px(3.),
+                            color,
+                            gpui::Edges::default(),
+                            gpui::transparent_black(),
+                            gpui::BorderStyle::default(),
+                        ));
+                    }
+                }
+            }
         }
 
         // Paint selections

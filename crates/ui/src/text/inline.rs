@@ -265,7 +265,8 @@ impl Inline {
         text_layout: &TextLayout,
         bounds: &Bounds<Pixels>,
         window: &mut Window,
-        cx: &mut App,
+        color: gpui::Hsla,
+        radius: Pixels,
     ) {
         let mut start = selection.start;
         let mut end = selection.end;
@@ -286,8 +287,8 @@ impl Inline {
                     start_position,
                     point(end_position.x, end_position.y + line_height),
                 ),
-                px(0.),
-                cx.theme().selection,
+                radius,
+                color,
                 Edges::default(),
                 gpui::transparent_black(),
                 BorderStyle::default(),
@@ -298,8 +299,8 @@ impl Inline {
                     start_position,
                     point(bounds.right(), start_position.y + line_height),
                 ),
-                px(0.),
-                cx.theme().selection,
+                radius,
+                color,
                 Edges::default(),
                 gpui::transparent_black(),
                 BorderStyle::default(),
@@ -311,8 +312,8 @@ impl Inline {
                         point(bounds.left(), start_position.y + line_height),
                         point(bounds.right(), end_position.y),
                     ),
-                    px(0.),
-                    cx.theme().selection,
+                    radius,
+                    color,
                     Edges::default(),
                     gpui::transparent_black(),
                     BorderStyle::default(),
@@ -324,8 +325,8 @@ impl Inline {
                     point(bounds.left(), end_position.y),
                     point(end_position.x, end_position.y + line_height),
                 ),
-                px(0.),
-                cx.theme().selection,
+                radius,
+                color,
                 Edges::default(),
                 gpui::transparent_black(),
                 BorderStyle::default(),
@@ -383,7 +384,15 @@ impl Element for Inline {
         let highlights = gpui::combine_highlights(self.highlights.clone(), hover_highlights);
         let mut runs = Vec::new();
         let mut ix = 0;
-        for (range, highlight) in highlights {
+        for (range, mut highlight) in highlights {
+            if self
+                .links
+                .iter()
+                .any(|(link, _)| link.start <= range.start && link.end >= range.end)
+            {
+                // Link chip backgrounds are painted with rounded corners below.
+                highlight.background_color = None;
+            }
             if ix < range.start {
                 runs.push(text_style.clone().to_run(range.start - ix));
             }
@@ -472,6 +481,23 @@ impl Element for Inline {
         };
 
         let text_layout = self.styled_text.layout().clone();
+        for (range, highlight) in &self.highlights {
+            if let Some(color) = highlight.background_color
+                && self
+                    .links
+                    .iter()
+                    .any(|(link, _)| link.start <= range.start && link.end >= range.end)
+            {
+                Self::paint_selection(
+                    &range.clone().into(),
+                    &text_layout,
+                    &bounds,
+                    window,
+                    color,
+                    px(3.),
+                );
+            }
+        }
         self.styled_text
             .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
 
@@ -510,7 +536,14 @@ impl Element for Inline {
         }
 
         if let Some(selection) = &state.selection {
-            Self::paint_selection(selection, &text_layout, &bounds, window, cx);
+            Self::paint_selection(
+                selection,
+                &text_layout,
+                &bounds,
+                window,
+                cx.theme().selection,
+                px(0.),
+            );
         }
 
         if is_selectable {
