@@ -45,6 +45,8 @@ pub struct TextViewStyle {
     /// Default is [`HighlightStyle::default()`], the `background_color` will
     /// fallback to `cx.theme().accent`, if it is `None`.
     pub inline_code: HighlightStyle,
+    /// Optional per-destination styling, applied after the default link color.
+    pub link_highlight: Option<fn(&str) -> Option<HighlightStyle>>,
     pub is_dark: bool,
 }
 
@@ -67,6 +69,11 @@ impl PartialEq for TextViewStyle {
             && self.table_head == other.table_head
             && self.table_cell == other.table_cell
             && self.inline_code == other.inline_code
+            && match (self.link_highlight, other.link_highlight) {
+                (Some(left), Some(right)) => std::ptr::fn_addr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
             && self.is_dark == other.is_dark
     }
 }
@@ -84,6 +91,7 @@ impl Default for TextViewStyle {
             table_head: StyleRefinement::default(),
             table_cell: StyleRefinement::default(),
             inline_code: HighlightStyle::default(),
+            link_highlight: None,
             is_dark: false,
         }
     }

@@ -1508,6 +1508,11 @@ impl Paragraph {
                             }
                         }
 
+                        if let Some(style) =
+                            node_cx.style.link_highlight.and_then(|f| f(&link_mark.url))
+                        {
+                            highlight = highlight.highlight(style);
+                        }
                         links.push((inner_range.clone(), link_mark));
                     }
 
@@ -1625,6 +1630,11 @@ impl Paragraph {
                             link_mark = mark.clone();
                         }
 
+                        if let Some(style) =
+                            node_cx.style.link_highlight.and_then(|f| f(&link_mark.url))
+                        {
+                            highlight = highlight.highlight(style);
+                        }
                         links.push((inner_range.clone(), link_mark));
                     }
 
