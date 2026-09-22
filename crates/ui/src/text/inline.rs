@@ -467,8 +467,42 @@ impl Element for Inline {
 
         // link cursor pointer
         let mouse_position = window.mouse_position();
-        if let Some(_) = Self::link_for_position(&text_layout, &self.links, mouse_position) {
+        if let Some(link) = Self::link_for_position(&text_layout, &self.links, mouse_position) {
             window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
+            if hitbox.is_hovered(window) {
+                let hitbox = hitbox.clone();
+                let layout = text_layout.clone();
+                let links = self.links.clone();
+                let url = link.url.clone();
+                let view = crate::tooltip::Tooltip::new(link.url).build(window, cx);
+                window.set_tooltip(gpui::AnyTooltip {
+                    view,
+                    mouse_position,
+                    check_visible_and_update: Rc::new(move |_, window, _| {
+                        hitbox.is_hovered(window)
+                            && Self::link_for_position(&layout, &links, window.mouse_position())
+                                .is_some_and(|link| link.url == url)
+                    }),
+                });
+            }
+        }
+
+        // A link's context menu owns right clicks, not the surrounding message.
+        if self.link_click_handler.is_some() {
+            window.on_mouse_event({
+                let hitbox = hitbox.clone();
+                let layout = text_layout.clone();
+                let links = self.links.clone();
+                move |event: &MouseDownEvent, phase, window, cx| {
+                    if phase.bubble()
+                        && event.button == MouseButton::Right
+                        && hitbox.is_hovered(window)
+                        && Self::link_for_position(&layout, &links, event.position).is_some()
+                    {
+                        cx.stop_propagation();
+                    }
+                }
+            });
         }
 
         if let Some(selection) = &state.selection {
@@ -565,7 +599,7 @@ impl Element for Inline {
             }
         });
 
-        if !is_selection {
+        {
             // click to open link
             window.on_mouse_event({
                 let links = self.links.clone();
@@ -578,9 +612,10 @@ impl Element for Inline {
                     if !phase.bubble() || !hitbox.is_hovered(window) {
                         return;
                     }
-                    if text_view_state
-                        .as_ref()
-                        .is_some_and(|state| state.read(cx).has_selection(cx))
+                    if event.button != MouseButton::Right
+                        && text_view_state
+                            .as_ref()
+                            .is_some_and(|state| state.read(cx).has_selection(cx))
                     {
                         return;
                     }
