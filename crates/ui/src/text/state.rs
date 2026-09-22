@@ -143,7 +143,9 @@ impl TextViewState {
         let selection_adapter = TextViewSelectionAdapter::new(cx.entity().downgrade(), cx);
 
         let (tx, rx) = unbounded::<UpdateOptions>();
-        let (tx_result, rx_result) = unbounded::<ParsedUpdate>();
+        // Queue blocks hold multiple values. Keep large parse results off the
+        // small macOS dispatch worker stack when those blocks are allocated.
+        let (tx_result, rx_result) = unbounded::<Box<ParsedUpdate>>();
         let _receive_task = cx.spawn({
             async move |weak_self, cx| {
                 while let Ok(parsed_update) = rx_result.recv().await {
@@ -662,14 +664,14 @@ struct UpdateFuture {
     format: TextViewFormat,
     content: ParsedContent,
     rx: Pin<Box<Receiver<UpdateOptions>>>,
-    tx_result: Sender<ParsedUpdate>,
+    tx_result: Sender<Box<ParsedUpdate>>,
 }
 
 impl UpdateFuture {
     fn new(
         format: TextViewFormat,
         rx: Receiver<UpdateOptions>,
-        tx_result: Sender<ParsedUpdate>,
+        tx_result: Sender<Box<ParsedUpdate>>,
     ) -> Self {
         Self {
             format,
@@ -694,13 +696,13 @@ impl Future for UpdateFuture {
                     if let Ok(content) = &res {
                         self.content = content.clone();
                     }
-                    _ = self.tx_result.try_send(ParsedUpdate {
+                    _ = self.tx_result.try_send(Box::new(ParsedUpdate {
                         revision: options.revision,
                         full_parse: !options.append,
                         selection_compatible: options.mode == ParseMode::Compatible,
                         baseline_ack: options.mode == ParseMode::BaselineAck,
                         result: res,
-                    });
+                    }));
                     if hit_coalesce_budget {
                         cx.waker().wake_by_ref();
                         return Poll::Pending;
@@ -829,6 +831,44 @@ mod tests {
     use super::*;
     use crate::text::MarkdownNode;
     use gpui::TestAppContext;
+
+    #[test]
+    #[cfg(not(target_family = "wasm"))]
+    fn parse_results_fit_on_a_dispatch_worker_stack() {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let (tx, rx) = unbounded::<UpdateOptions>();
+                let (tx_result, rx_result) = unbounded::<Box<ParsedUpdate>>();
+                let mut future =
+                    Box::pin(UpdateFuture::new(TextViewFormat::Markdown, rx, tx_result));
+                let waker = futures::task::noop_waker();
+                let mut cx = std::task::Context::from_waker(&waker);
+
+                // Cross a queue block boundary as well as allocating the first block.
+                for revision in 1..=64 {
+                    tx.try_send(UpdateOptions {
+                        revision,
+                        pending_text: "hello".to_owned(),
+                        append: false,
+                        mode: ParseMode::Replace,
+                        markdown_extensions: Arc::default(),
+                    })
+                    .unwrap();
+
+                    assert!(matches!(
+                        std::future::Future::poll(future.as_mut(), &mut cx),
+                        Poll::Pending
+                    ));
+                    let update = rx_result.try_recv().expect("parse result");
+                    assert_eq!(update.revision, revision);
+                    assert_eq!(update.result.unwrap().document.source.as_ref(), "hello");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 
     #[gpui::test]
     fn small_full_replace_parses_before_background_executor_runs(cx: &mut TestAppContext) {
@@ -1032,7 +1072,7 @@ mod tests {
     #[test]
     fn update_future_yields_before_coalescing_all_queued_updates() {
         let (tx, rx) = unbounded::<UpdateOptions>();
-        let (tx_result, rx_result) = unbounded::<ParsedUpdate>();
+        let (tx_result, rx_result) = unbounded::<Box<ParsedUpdate>>();
         let total_updates = 128;
 
         for revision in 1..=total_updates {
