@@ -1401,6 +1401,7 @@ impl Paragraph {
 
         let mut text = String::new();
         let mut highlights: Vec<(Range<usize>, HighlightStyle)> = vec![];
+        let mut font_runs: Vec<(Range<usize>, SharedString)> = vec![];
         let mut links: Vec<(Range<usize>, LinkMark)> = vec![];
         let mut offset = 0;
 
@@ -1422,6 +1423,7 @@ impl Paragraph {
                             highlights.clone(),
                             node_cx.link_click_handler.clone(),
                         )
+                        .font_runs(font_runs.clone())
                         .into_any_element(),
                     );
                 }
@@ -1470,6 +1472,7 @@ impl Paragraph {
                 text.clear();
                 links.clear();
                 highlights.clear();
+                font_runs.clear();
                 offset = 0;
             } else {
                 let mut node_highlights = vec![];
@@ -1496,6 +1499,7 @@ impl Paragraph {
                         });
                     }
                     if style.code {
+                        font_runs.push((inner_range.clone(), cx.theme().mono_font_family.clone()));
                         highlight = highlight.highlight(node_cx.style.inline_code_highlight(cx));
                     }
                     if let Some(color) = style.highlight {
@@ -1542,6 +1546,7 @@ impl Paragraph {
                     highlights,
                     node_cx.link_click_handler.clone(),
                 )
+                .font_runs(font_runs)
                 .into_any_element(),
             );
         }
@@ -1562,6 +1567,7 @@ impl Paragraph {
         let mut items = Vec::new();
         let mut text = String::new();
         let mut highlights: Vec<(Range<usize>, HighlightStyle)> = vec![];
+        let mut font_runs: Vec<(Range<usize>, SharedString)> = vec![];
         let mut links: Vec<(Range<usize>, LinkMark)> = vec![];
         let mut offset = 0;
 
@@ -1579,6 +1585,7 @@ impl Paragraph {
                         text: text.clone().into(),
                         links: links.clone(),
                         highlights: highlights.clone(),
+                        font_runs: font_runs.clone(),
                     });
                 }
 
@@ -1593,6 +1600,7 @@ impl Paragraph {
                 text.clear();
                 links.clear();
                 highlights.clear();
+                font_runs.clear();
                 offset = 0;
             } else {
                 let mut node_highlights = vec![];
@@ -1619,6 +1627,7 @@ impl Paragraph {
                         });
                     }
                     if style.code {
+                        font_runs.push((inner_range.clone(), cx.theme().mono_font_family.clone()));
                         highlight = highlight.highlight(node_cx.style.inline_code_highlight(cx));
                     }
                     if let Some(color) = style.highlight {
@@ -1659,6 +1668,7 @@ impl Paragraph {
                 text: text.into(),
                 links,
                 highlights,
+                font_runs,
             });
         }
 
@@ -2458,6 +2468,36 @@ impl BlockNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn inline_code_flow_preserves_font_ranges_among_formatted_text(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            crate::theme::init(cx);
+            let paragraph = paragraph_with_children(vec![
+                InlineNode::new("é ").marks(vec![(0..3, TextMark::default().italic())]),
+                InlineNode::new("code").marks(vec![(0..4, TextMark::default().code().bold())]),
+                InlineNode::new(" 後"),
+            ]);
+            let items = paragraph.inline_flow_items(&NodeContext::default(), cx);
+            let InlineFlowItem::Text {
+                text,
+                font_runs,
+                highlights,
+                ..
+            } = &items[0]
+            else {
+                panic!("expected text");
+            };
+            assert_eq!(text.as_ref(), "é code 後");
+            assert_eq!(
+                font_runs,
+                &vec![(3..7, cx.theme().mono_font_family.clone())]
+            );
+            assert!(highlights.iter().any(|(range, style)| *range == (3..7)
+                && style.font_weight == Some(FontWeight::BOLD)
+                && style.background_color.is_some()));
+        });
+    }
 
     #[test]
     fn reconstruct_markdown_wraps_marked_runs() {

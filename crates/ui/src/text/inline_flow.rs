@@ -39,6 +39,7 @@ pub(super) enum InlineFlowItem {
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, HighlightStyle)>,
+        font_runs: Vec<(Range<usize>, SharedString)>,
     },
     Image {
         url: SharedUri,
@@ -70,6 +71,7 @@ enum PositionedFragment {
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, HighlightStyle)>,
+        font_runs: Vec<(Range<usize>, SharedString)>,
     },
     Image {
         item_ix: usize,
@@ -83,6 +85,7 @@ enum MeasureItem {
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, HighlightStyle)>,
+        font_runs: Vec<(Range<usize>, SharedString)>,
     },
     Image {
         url: SharedUri,
@@ -103,6 +106,7 @@ enum LineFragmentKind {
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, HighlightStyle)>,
+        font_runs: Vec<(Range<usize>, SharedString)>,
     },
     Image,
 }
@@ -295,6 +299,7 @@ impl Element for InlineFlow {
                     text,
                     links,
                     highlights,
+                    font_runs,
                     ..
                 } => {
                     let state = match &self.items[item_ix] {
@@ -316,6 +321,7 @@ impl Element for InlineFlow {
                         highlights,
                         self.link_click_handler.clone(),
                     )
+                    .font_runs(font_runs)
                     .into_any_element();
                     element.prepaint_as_root(
                         bounds.origin + origin,
@@ -389,11 +395,13 @@ impl From<&InlineFlowItem> for MeasureItem {
                 text,
                 links,
                 highlights,
+                font_runs,
                 ..
             } => MeasureItem::Text {
                 text: text.clone(),
                 links: links.clone(),
                 highlights: highlights.clone(),
+                font_runs: font_runs.clone(),
             },
             InlineFlowItem::Image {
                 url, width, height, ..
@@ -456,6 +464,7 @@ fn layout_flow(
                     text,
                     links,
                     highlights,
+                    font_runs,
                 } => {
                     let local_start = line_range.start.max(item_start) - item_start;
                     let local_end = line_range.end.min(item_end) - item_start;
@@ -468,7 +477,15 @@ fn layout_flow(
                         let links = slice_ranges(links, local_start, local_end, |range, link| {
                             (range, link.clone())
                         });
-                        let runs = runs_for_highlights(&subtext, text_style, highlights.clone());
+                        let font_runs =
+                            slice_ranges(font_runs, local_start, local_end, |range, family| {
+                                (range, family.clone())
+                            });
+                        let runs = super::inline::apply_font_runs(
+                            runs_for_highlights(&subtext, text_style, highlights.clone()),
+                            &font_runs,
+                        );
+
                         let shaped_line = shape_line(subtext.clone(), font_size, &runs, window);
                         let width = shaped_line.width();
                         line_width += width;
@@ -478,6 +495,7 @@ fn layout_flow(
                                 text: subtext,
                                 links,
                                 highlights,
+                                font_runs,
                             },
                             size: size(width, line_height),
                             source_range: local_start..local_end,
@@ -511,6 +529,7 @@ fn layout_flow(
                     text,
                     links,
                     highlights,
+                    font_runs,
                 } => PositionedFragment::Text {
                     item_ix: fragment.item_ix,
                     origin,
@@ -519,6 +538,7 @@ fn layout_flow(
                     text,
                     links,
                     highlights,
+                    font_runs,
                 },
                 LineFragmentKind::Image => PositionedFragment::Image {
                     item_ix: fragment.item_ix,

@@ -32,6 +32,7 @@ pub(super) struct Inline {
     links: Rc<Vec<(Range<usize>, LinkMark)>>,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     styled_text: StyledText,
+    font_runs: Vec<(Range<usize>, SharedString)>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
 
     state: Arc<Mutex<InlineState>>,
@@ -72,9 +73,15 @@ impl Inline {
             highlights,
             text: text.clone(),
             styled_text: StyledText::new(text),
+            font_runs: Vec::new(),
             link_click_handler,
             state,
         }
+    }
+
+    pub(super) fn font_runs(mut self, font_runs: Vec<(Range<usize>, SharedString)>) -> Self {
+        self.font_runs = font_runs;
+        self
     }
 
     /// Get link at given mouse position.
@@ -389,8 +396,12 @@ impl Element for Inline {
                 .links
                 .iter()
                 .any(|(link, _)| link.start <= range.start && link.end >= range.end)
+                || self
+                    .font_runs
+                    .iter()
+                    .any(|(code, _)| code.start <= range.start && code.end >= range.end)
             {
-                // Link chip backgrounds are painted with rounded corners below.
+                // Link and inline-code backgrounds are painted with rounded corners below.
                 highlight.background_color = None;
             }
             if ix < range.start {
@@ -403,7 +414,8 @@ impl Element for Inline {
             runs.push(text_style.to_run(self.text.len() - ix));
         }
 
-        self.styled_text = StyledText::new(self.text.clone()).with_runs(runs);
+        self.styled_text =
+            StyledText::new(self.text.clone()).with_runs(apply_font_runs(runs, &self.font_runs));
         let (layout_id, _) =
             self.styled_text
                 .request_layout(global_element_id, inspector_id, window, cx);
@@ -483,10 +495,14 @@ impl Element for Inline {
         let text_layout = self.styled_text.layout().clone();
         for (range, highlight) in &self.highlights {
             if let Some(color) = highlight.background_color
-                && self
+                && (self
                     .links
                     .iter()
                     .any(|(link, _)| link.start <= range.start && link.end >= range.end)
+                    || self
+                        .font_runs
+                        .iter()
+                        .any(|(code, _)| code.start <= range.start && code.end >= range.end))
             {
                 Self::paint_selection(
                     &range.clone().into(),
@@ -999,5 +1015,67 @@ mod tests {
             end,
             line_height
         ));
+    }
+}
+
+/// Split shaped runs at font boundaries without changing UTF-8 byte offsets.
+pub(super) fn apply_font_runs(
+    runs: Vec<gpui::TextRun>,
+    fonts: &[(Range<usize>, SharedString)],
+) -> Vec<gpui::TextRun> {
+    if fonts.is_empty() {
+        return runs;
+    }
+    let mut result = Vec::new();
+    let mut offset = 0;
+    for run in runs {
+        let end = offset + run.len;
+        let mut boundaries = vec![offset, end];
+        for (range, _) in fonts {
+            if range.start > offset && range.start < end {
+                boundaries.push(range.start);
+            }
+            if range.end > offset && range.end < end {
+                boundaries.push(range.end);
+            }
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+        for boundary in boundaries.windows(2) {
+            let mut part = run.clone();
+            part.len = boundary[1] - boundary[0];
+            if let Some((_, family)) = fonts.iter().find(|(range, _)| range.contains(&boundary[0]))
+            {
+                part.font.family = family.clone();
+                part.font.style = gpui::FontStyle::Normal;
+            }
+            result.push(part);
+        }
+        offset = end;
+    }
+    result
+}
+
+#[cfg(test)]
+mod font_run_tests {
+    use super::*;
+
+    #[test]
+    fn code_font_splits_runs_and_preserves_utf8_offsets_and_surrounding_style() {
+        let mut style = gpui::TextStyle::default();
+        style.font_style = gpui::FontStyle::Italic;
+        let text = "é code 後";
+        let runs = apply_font_runs(
+            vec![style.to_run(text.len())],
+            &[(3..7, "Test Mono".into())],
+        );
+        assert_eq!(
+            runs.iter().map(|run| run.len).collect::<Vec<_>>(),
+            vec![3, 4, 4]
+        );
+        assert_eq!(runs[0].font.style, gpui::FontStyle::Italic);
+        assert_eq!(runs[1].font.family.as_ref(), "Test Mono");
+        assert_eq!(runs[1].font.style, gpui::FontStyle::Normal);
+        assert_eq!(runs[2].font.style, gpui::FontStyle::Italic);
     }
 }
