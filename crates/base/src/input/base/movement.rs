@@ -65,7 +65,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.undo_manager.break_transaction_coalescing();
-        let offset = offset.clamp(0, self.text.len());
+        let offset =
+            super::inline_tokens::snap(&self.inline_tokens, offset.clamp(0, self.text.len()), None);
         self.cursor_line_end_affinity = line_end_affinity;
         self.selected_range = (offset..offset).into();
         self.scroll_to(offset, direction, cx);

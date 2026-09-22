@@ -2067,6 +2067,7 @@ mod tests {
                 TextSelectionRegistration::new(
                     Hitbox {
                         id: HitboxId::placeholder(),
+                        tags: Default::default(),
                         bounds,
                         content_mask: ContentMask { bounds },
                         behavior: HitboxBehavior::Normal,
@@ -2226,6 +2227,7 @@ mod tests {
         let bounds = Bounds::new(point(px(1.), px(2.)), size(px(30.), px(10.)));
         let hitbox = Hitbox {
             id: HitboxId::placeholder(),
+            tags: Default::default(),
             bounds,
             content_mask: ContentMask { bounds },
             behavior: HitboxBehavior::Normal,
@@ -3137,6 +3139,7 @@ mod tests {
             let bounds = Bounds::new(point(px(0.), px(0.)), size(px(100.), px(20.)));
             let hitbox = Hitbox {
                 id: HitboxId::placeholder(),
+                tags: Default::default(),
                 bounds,
                 content_mask: ContentMask { bounds },
                 behavior: HitboxBehavior::Normal,

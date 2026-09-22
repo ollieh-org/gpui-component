@@ -52,7 +52,10 @@ impl UndoManager {
         if self.ignoring {
             return;
         }
-        if change.old_range == change.new_range && change.old_text == change.new_text {
+        if change.old_range == change.new_range
+            && change.old_text == change.new_text
+            && change.old_tokens == change.new_tokens
+        {
             self.break_transaction_coalescing();
             return;
         }
@@ -62,6 +65,7 @@ impl UndoManager {
                 pending.new_range = change.new_range;
                 pending.new_text = change.new_text;
                 pending.selection_after = change.selection_after;
+                pending.new_tokens = change.new_tokens;
             } else {
                 self.pending_change = Some(change);
             }
@@ -84,7 +88,9 @@ impl UndoManager {
         }
         self.transaction_open = false;
         if let Some(change) = self.pending_change.take()
-            && (change.old_range != change.new_range || change.old_text != change.new_text)
+            && (change.old_range != change.new_range
+                || change.old_text != change.new_text
+                || change.old_tokens != change.new_tokens)
         {
             self.push_transaction(change, EditIntent::Atomic);
         }

@@ -432,13 +432,13 @@ mod tests {
             indicator(CheckboxState::Checked, false)
                 .resolved_style()
                 .border_color,
-            Some(checked_color)
+            Some(checked_color.into())
         );
         assert_eq!(
             indicator(CheckboxState::Checked, true)
                 .resolved_style()
                 .border_color,
-            Some(disabled_color)
+            Some(disabled_color.into())
         );
         assert_eq!(
             indicator(CheckboxState::Indeterminate, false)
@@ -451,7 +451,7 @@ mod tests {
                 .border_color(checked_color)
                 .resolved_style()
                 .border_color,
-            Some(disabled_color)
+            Some(disabled_color.into())
         );
     }
 
@@ -626,7 +626,7 @@ mod tests {
                     .disabled(|style| style.opacity(0.5))
             })
             .resolved_style();
-        assert_eq!(combined.border_color, Some(checked_color));
+        assert_eq!(combined.border_color, Some(checked_color.into()));
         assert_eq!(combined.opacity, Some(0.5));
 
         let state_over_instance = styles(

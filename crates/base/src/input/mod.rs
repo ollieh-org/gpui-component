@@ -54,6 +54,9 @@ mod selection;
 #[path = "base/state.rs"]
 mod state;
 mod textarea;
+#[path = "base/inline_tokens.rs"]
+mod inline_tokens;
+pub use inline_tokens::InlineTokenSpec;
 #[path = "base/undo_manager.rs"]
 mod undo_manager;
 

@@ -260,7 +260,10 @@ mod tests {
             .focused(true)
             .border_color(gpui::red())
             .styles(|styles| styles.focused(|style| style.border_color(gpui::blue())));
-        assert_eq!(focused.resolved_style().border_color, Some(gpui::blue()));
+        assert_eq!(
+            focused.resolved_style().border_color,
+            Some(gpui::blue().into())
+        );
 
         let disabled = InputBase::new("disabled")
             .focused(true)

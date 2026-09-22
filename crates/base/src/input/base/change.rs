@@ -10,10 +10,22 @@ pub(super) struct Change {
     pub(crate) new_text: String,
     pub(crate) selection_before: Selection,
     pub(crate) selection_after: Selection,
+    pub(crate) old_tokens: Vec<super::inline_tokens::InlineToken>,
+    pub(crate) new_tokens: Vec<super::inline_tokens::InlineToken>,
     version: usize,
 }
 
 impl Change {
+    pub(super) fn with_tokens(
+        mut self,
+        old: Vec<super::inline_tokens::InlineToken>,
+        new: Vec<super::inline_tokens::InlineToken>,
+    ) -> Self {
+        self.old_tokens = old;
+        self.new_tokens = new;
+        self
+    }
+
     pub(super) fn new(
         old_range: impl Into<Selection>,
         old_text: &str,
@@ -30,6 +42,8 @@ impl Change {
             selection_before,
             selection_after,
             version: 0,
+            old_tokens: Vec::new(),
+            new_tokens: Vec::new(),
         }
     }
 }

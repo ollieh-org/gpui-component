@@ -19,6 +19,8 @@ use std::rc::Rc;
 use sum_tree::Bias;
 use unicode_segmentation::*;
 
+use super::inline_tokens::{self, InlineToken, InlineTokenSpec};
+
 use super::{
     DiagnosticSet, DisplayMap, InputContextMenuCapabilities, InputEditorStyle,
     InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep, WrappingIndent,
@@ -301,6 +303,9 @@ pub struct InputBaseState<M: InputModeKind> {
     /// - "Hello 世界💝" = 16
     /// - "💝" = 4
     pub(super) selected_range: Selection,
+    pub(super) inline_tokens: Vec<InlineToken>,
+    token_parser: Option<std::sync::Arc<dyn Fn(&str) -> Vec<InlineTokenSpec> + Send + Sync>>,
+    pub(super) token_style: gpui::HighlightStyle,
     /// Range for save the selected word, use to keep word range when drag move.
     pub(super) selected_word_range: Option<Selection>,
     pub(super) selection_reversed: bool,
@@ -626,6 +631,9 @@ impl<M: InputModeKind> InputBaseState<M> {
             blink_cursor,
             undo_manager,
             selected_range: Selection::default(),
+            inline_tokens: Vec::new(),
+            token_parser: None,
+            token_style: gpui::HighlightStyle::default(),
             selected_word_range: None,
             selection_reversed: false,
             ime_marked_range: None,
@@ -1117,6 +1125,36 @@ impl<M: InputModeKind> InputBaseState<M> {
         // The text will be set during prepare_if_need in element.rs
         self._pending_update = true;
         self
+    }
+
+    /// Configure atomic inline tokens before assigning the field's value.
+    /// The parser receives inserted source text; ranges and cursor offsets remain
+    /// relative to the displayed value. Use `serialized_value` for persistence.
+    pub fn inline_tokens(
+        mut self,
+        parser: impl Fn(&str) -> Vec<InlineTokenSpec> + Send + Sync + 'static,
+        style: gpui::HighlightStyle,
+    ) -> Self {
+        self.token_parser = Some(std::sync::Arc::new(parser));
+        self.token_style = style;
+        self
+    }
+
+    pub fn inline_token_range_at(&self, offset: usize) -> Option<Range<usize>> {
+        self.inline_tokens
+            .iter()
+            .find(|token| token.range.contains(&offset))
+            .map(|token| token.range.clone())
+    }
+
+    /// Return the displayed text with each atomic token replaced by its source.
+    pub fn serialized_value(&self) -> SharedString {
+        inline_tokens::serialize(
+            &self.text.to_string(),
+            &self.inline_tokens,
+            0..self.text.len(),
+        )
+        .into()
     }
 
     /// Return the value of the input field as an owned string.
@@ -1966,7 +2004,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         }
 
-        let selected_text = self.text.slice(self.selected_range).to_string();
+        let selected_text = inline_tokens::serialize(
+            &self.text.to_string(),
+            &self.inline_tokens,
+            self.selected_range.into(),
+        );
         cx.write_to_clipboard(ClipboardItem::new_string(selected_text));
     }
 
@@ -1975,7 +2017,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         }
 
-        let selected_text = self.text.slice(self.selected_range).to_string();
+        let selected_text = inline_tokens::serialize(
+            &self.text.to_string(),
+            &self.inline_tokens,
+            self.selected_range.into(),
+        );
         cx.write_to_clipboard(ClipboardItem::new_string(selected_text));
 
         self.undo_manager.pending_intent = Some(EditIntent::Atomic);
@@ -1999,6 +2045,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         requested_intent: Option<EditIntent>,
         selection_before: Selection,
         selection_after: Option<Selection>,
+        old_tokens: &[InlineToken],
     ) {
         if self.undo_manager.is_ignoring() {
             return;
@@ -2037,34 +2084,41 @@ impl<M: InputModeKind> InputBaseState<M> {
                 new_text,
                 selection_before,
                 selection_after,
-            ),
+            )
+            .with_tokens(old_tokens.to_vec(), self.inline_tokens.clone()),
             intent,
         );
     }
 
     pub(super) fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
+        let token_parser = self.token_parser.take();
         self.undo_manager.set_ignoring(true);
         if let Some(changes) = self.undo_manager.undo() {
             let selection = changes.last().unwrap().selection_before;
             for change in &changes {
                 let range_utf16 = self.range_to_utf16(&change.new_range.into());
                 self.replace_text_in_range_silent(Some(range_utf16), &change.old_text, window, cx);
+                self.inline_tokens = change.old_tokens.clone();
             }
             self.selected_range = selection;
         }
+        self.token_parser = token_parser;
         self.undo_manager.set_ignoring(false);
     }
 
     pub(super) fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
+        let token_parser = self.token_parser.take();
         self.undo_manager.set_ignoring(true);
         if let Some(changes) = self.undo_manager.redo() {
             let selection = changes.last().unwrap().selection_after;
             for change in &changes {
                 let range_utf16 = self.range_to_utf16(&change.old_range.into());
                 self.replace_text_in_range_silent(Some(range_utf16), &change.new_text, window, cx);
+                self.inline_tokens = change.new_tokens.clone();
             }
             self.selected_range = selection;
         }
+        self.token_parser = token_parser;
         self.undo_manager.set_ignoring(false);
     }
 
@@ -2126,6 +2180,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Non-empty ranges expand to character boundaries. Empty ranges remain empty and are
     /// clipped to the preceding character boundary.
     pub fn set_selected_range(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+        let range = inline_tokens::expand(&self.inline_tokens, range);
         let end_bias = if range.start == range.end {
             Bias::Left
         } else {
@@ -2251,7 +2306,16 @@ impl<M: InputModeKind> InputBaseState<M> {
         M::clear_inline_completion(self, cx);
 
         self.cursor_line_end_affinity = line_end_affinity;
-        let offset = offset.clamp(0, self.text.len());
+        let anchor = if self.selection_reversed {
+            self.selected_range.end
+        } else {
+            self.selected_range.start
+        };
+        let offset = inline_tokens::snap(
+            &self.inline_tokens,
+            offset.clamp(0, self.text.len()),
+            Some(offset >= anchor),
+        );
         if self.selection_reversed {
             self.selected_range.start = offset
         } else {
@@ -2342,7 +2406,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             }
         }
 
-        self.clamp_offset_to_visible_backward(offset)
+        inline_tokens::snap(
+            &self.inline_tokens,
+            self.clamp_offset_to_visible_backward(offset),
+            Some(false),
+        )
     }
 
     pub(super) fn next_boundary(&self, offset: usize) -> usize {
@@ -2353,7 +2421,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             }
         }
 
-        self.clamp_offset_to_visible_forward(offset)
+        inline_tokens::snap(
+            &self.inline_tokens,
+            self.clamp_offset_to_visible_forward(offset),
+            Some(true),
+        )
     }
 
     /// Returns the true to let InputElement to render cursor, when Input is focused and current BlinkCursor is visible.
@@ -2749,6 +2821,13 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         // UTF-8 byte length, so all the byte-offset calculations below must
         // use the normalized text.
         let new_text = self.normalize_input(new_text);
+        let (new_text, inserted_tokens) = inline_tokens::tokenize(
+            &new_text,
+            self.token_parser
+                .as_ref()
+                .map(|parser| parser(&new_text))
+                .unwrap_or_default(),
+        );
         let new_text: &str = &new_text;
 
         let range = range_utf16
@@ -2760,6 +2839,8 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             }))
             .unwrap_or(self.selected_range.into());
 
+        let range = inline_tokens::expand(&self.inline_tokens, range);
+        let old_tokens = self.inline_tokens.clone();
         let old_text = self.text.clone();
         self.text.replace(range.clone(), new_text);
 
@@ -2793,6 +2874,8 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             }
         }
 
+        self.inline_tokens =
+            inline_tokens::edited(&old_tokens, &range, new_text.len(), inserted_tokens);
         if mask_changed {
             // Masking rewrites the whole document, so ranges recorded against
             // the old text no longer point at anything.
@@ -2811,6 +2894,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 Some(EditIntent::Atomic),
                 selection_before,
                 Some(Selection::new(new_offset, new_offset)),
+                &old_tokens,
             );
         } else {
             self.push_history(
@@ -2820,6 +2904,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 requested_intent,
                 selection_before,
                 None,
+                &old_tokens,
             );
         }
         // A commit ends the IME composition: macOS delivers `insertText:` for
@@ -2902,6 +2987,8 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             }))
             .unwrap_or(self.selected_range.into());
 
+        let range = inline_tokens::expand(&self.inline_tokens, range);
+        let old_tokens = self.inline_tokens.clone();
         let old_text = self.text.clone();
         self.text.replace(range.clone(), new_text);
 
@@ -2962,6 +3049,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         if self.is_multi_line() {
             self.mode.update_auto_grow(&self.display_map);
         }
+        self.inline_tokens = inline_tokens::edited(&old_tokens, &range, new_text.len(), Vec::new());
         self.push_history(
             &old_text,
             &range,
@@ -2969,6 +3057,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             requested_intent,
             selection_before,
             Some(self.selected_range),
+            &old_tokens,
         );
         if new_text.is_empty() {
             self.undo_manager.commit_transaction();
@@ -3273,6 +3362,69 @@ mod tests {
                 f(crate::input::InputState::new(window, cx))
             })
         }
+    }
+
+    #[gpui::test]
+    fn atomic_inline_tokens_edit_select_and_restore_history(cx: &mut TestAppContext) {
+        let view = InputView::build_textarea(cx, |state| {
+            state.inline_tokens(
+                |text| {
+                    text.find("[George](")
+                        .and_then(|start| {
+                            text[start..].find(')').map(|end| (start, start + end + 1))
+                        })
+                        .map(|(start, end)| InlineTokenSpec {
+                            range: start..end,
+                            label: "@George".into(),
+                        })
+                        .into_iter()
+                        .collect()
+                },
+                gpui::HighlightStyle {
+                    background_color: Some(gpui::blue()),
+                    ..Default::default()
+                },
+            )
+        });
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_value("[George](target) test", window, cx);
+                assert_eq!(state.value(), "@George test");
+                assert_eq!(state.serialized_value(), "[George](target) test");
+                state.set_selected_range(0..7, cx);
+                state.replace("[George](other)", window, cx);
+                assert_eq!(state.serialized_value(), "[George](other) test");
+                state.undo(&Undo, window, cx);
+                assert_eq!(state.serialized_value(), "[George](target) test");
+                state.redo(&Redo, window, cx);
+                assert_eq!(state.serialized_value(), "[George](other) test");
+                state.undo(&Undo, window, cx);
+                state.set_selected_range(7..7, cx);
+                state.backspace(&Backspace, window, cx);
+                assert_eq!(state.value(), " test");
+                state.undo(&Undo, window, cx);
+                assert_eq!(state.serialized_value(), "[George](target) test");
+                state.redo(&Redo, window, cx);
+                assert_eq!(state.value(), " test");
+                state.undo(&Undo, window, cx);
+                state.set_selected_range(2..4, cx);
+                assert_eq!(state.selected_range(), 0..7);
+                state.copy(&Copy, window, cx);
+                state.delete(&Delete, window, cx);
+                state.paste(&Paste, window, cx);
+                assert_eq!(state.value(), "@George test");
+                assert_eq!(state.serialized_value(), "[George](target) test");
+                state.set_selected_range(0..0, cx);
+                state.replace("hello ", window, cx);
+                assert_eq!(state.serialized_value(), "hello [George](target) test");
+                state.set_selected_range(13..13, cx);
+                state.backspace(&Backspace, window, cx);
+                assert_eq!(state.value(), "hello  test");
+                state.undo(&Undo, window, cx);
+            });
+            window.draw(cx).clear(cx);
+        });
     }
 
     #[gpui::test]

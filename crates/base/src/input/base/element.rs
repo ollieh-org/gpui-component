@@ -1430,7 +1430,15 @@ impl<M: InputModeKind> TextElement<M> {
                 return (!state.masked)
                     .then(|| {
                         compose_decoration_collections(
-                            Vec::new(),
+                            compose_decorations(
+                                Vec::new(),
+                                state
+                                    .inline_tokens
+                                    .iter()
+                                    .map(|token| (token.range.clone(), state.token_style)),
+                                visible_byte_range.clone(),
+                            )
+                            .unwrap_or_default(),
                             state.extras.decoration_layers().into_iter(),
                             visible_byte_range,
                         )
